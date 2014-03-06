@@ -21,6 +21,9 @@ define(function () {
   RickshawSubGraph.prototype.init = function () {
     this.attachInGraphSlider();
     this.bindToButton();
+    this.bindToGraphUpdates();
+    // cache the selector
+    this.elementjQ = $(this.graph.element);
   };
 
   RickshawSubGraph.prototype.bindToButton = function () {
@@ -29,6 +32,14 @@ define(function () {
       thisRef.hideSelectionGraph();
     });
   }
+
+  RickshawSubGraph.prototype.bindToGraphUpdates = function () {
+    var thisRef = this;
+    this.graph.onUpdate(function () {
+      var wrapped = thisRef.handleGraphUpdate.bind(thisRef);
+      wrapped();
+    });
+  };
 
   RickshawSubGraph.prototype.attachInGraphSlider = function () {
     var thisRef = this;
@@ -62,12 +73,21 @@ define(function () {
     );
   };
 
+  RickshawSubGraph.prototype.handleGraphUpdate = function (event) {
+    if (this.selectionGraph)
+    {
+      this.mapData(this.selectionGraph.series);
+      this.selectionGraph.update();
+    }
+
+    return true;
+  };
+
   RickshawSubGraph.prototype.mouseMoved = function (event) {
     if (!this.mouseData.mouseDown)
       return;
-
-    var pointX = event.offsetX || event.layerX;
-    var pointY = event.offsetY || event.layerY;
+    
+    var pointX = event.pageX - this.elementjQ.offset().left;
 
     if (this.mouseData.startX == null)
       this.mouseData.startX = pointX;
@@ -97,7 +117,7 @@ define(function () {
     this.mouseData.box.remove();
 
     var startX = this.mouseData.startX;
-    var endX = event.offsetX || event.layerX;
+    var endX = event.pageX - this.elementjQ.offset().left;
 
     this.mouseData = { mouseDown: false };
 
@@ -118,7 +138,7 @@ define(function () {
   RickshawSubGraph.prototype.hideSelectionGraph = function () {
     $(this.options.selector).html("");
     this.selectionGraph = undefined;
-    $(this.graph.element).show();
+    this.elementjQ.show();
     $(this.options.buttonSelector).hide();
   }
 
@@ -129,26 +149,11 @@ define(function () {
     if (starting.nearestPoint != null && ending.nearestPoint != null) {
       // load up a secondary graph
 
-      var startingX = starting.nearestPoint.value.x;
-      var endingX = ending.nearestPoint.value.x;
+      this.startingX = starting.nearestPoint.value.x;
+      this.endingX = ending.nearestPoint.value.x;
 
-      var curData = this.graph.series;
       var scoped = [];
-      _.each(curData, function (set, total) {
-        var reduced = [];
-        _.each(set.data, function (point, total) {
-          if (point.x >= startingX && point.x <= endingX)
-            reduced.push(point);
-        });
-        var serie = {
-          data: reduced,
-          color: set.color,
-          disabled: set.disabled,
-          name: set.name,
-          renderer: set.renderer
-        }
-        scoped.push(serie);
-      });
+      this.mapData(scoped);
 
       this.selectionGraph = new Rickshaw.Graph({
         element: document.querySelector(this.options.selector),
@@ -164,11 +169,46 @@ define(function () {
         graph: this.selectionGraph
       });
 
-      $(this.graph.element).hide();
+      this.elementjQ.hide();
       this.selectionGraph.render();
 
       $(this.options.buttonSelector).show();
     }
+  };
+
+  RickshawSubGraph.prototype.mapData = function (scoped) {
+    var thisRef = this;
+    _.each(this.graph.series, function (set, total) {
+      var reduced = [];
+      _.each(set.data, function (point, total) {
+        if (point.x >= thisRef.startingX && point.x <= thisRef.endingX)
+          reduced.push(point);
+      });
+      var serie = {
+        data: reduced,
+        color: set.color,
+        disabled: set.disabled,
+        name: set.name,
+        renderer: set.renderer
+      }
+      
+      // add or update
+      var existing = null;
+      _.each(scoped, function (item, index, total) {
+        if (item.name == set.name)
+          existing = item;
+      });
+
+      if (existing != null)
+      {
+        existing.data = serie.data;
+        existing.disabled = serie.disabled;
+      }
+      else
+      {
+        scoped.push(serie);
+      }
+    });
   };
 
   // stolen from Rickshaw's Hover legend
